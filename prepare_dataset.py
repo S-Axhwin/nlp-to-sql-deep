@@ -89,6 +89,15 @@ def main():
     for k, v in sorted(counts.items()):
         print(f"  {k:12s}: {v}")
 
+    # Mix in hand-crafted domain examples x10 so model learns academic query patterns
+    import sys, random
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from dataset.intent_dataset import DATASET as HANDCRAFTED
+    domain_examples = [{"text": text, "label": label} for text, label in HANDCRAFTED] * 10
+    balanced = domain_examples + balanced
+    random.shuffle(balanced)
+    print(f"\nAfter domain boost: {len(balanced)} total examples ({len(domain_examples)} domain x10)")
+
     os.makedirs("dataset", exist_ok=True)
     with open(SAVE_PATH, "w") as f:
         json.dump(balanced, f, indent=2)
