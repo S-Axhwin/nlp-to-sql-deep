@@ -7,18 +7,21 @@ const SUGGESTIONS = [
   "show top 5 students by cgpa",
   "students with attendance below 75",
   "count all students",
+  "average cgpa of CSE students",
+  "worst 3 students by marks",
+  "students with cgpa above 8",
 ];
 
 function SqlToken({ sql }) {
-  const KEYWORDS = ["SELECT","FROM","WHERE","ORDER","BY","LIMIT","GROUP","HAVING","JOIN","LEFT","RIGHT","INNER","ON","AS","DESC","ASC","AND","OR","NOT","IN","LIKE","BETWEEN","IS","NULL","DISTINCT"];
+  const KEYWORDS  = ["SELECT","FROM","WHERE","ORDER","BY","LIMIT","GROUP","HAVING","JOIN","LEFT","RIGHT","INNER","ON","AS","DESC","ASC","AND","OR","NOT","IN","LIKE","BETWEEN","IS","NULL","DISTINCT"];
   const FUNCTIONS = ["COUNT","AVG","SUM","MIN","MAX","ROUND","COALESCE"];
-  const tokens = (sql || "").match(/('.*?'|".*?"|\b\d+\.?\d*\b|\b\w+\b|[^'"\w\s]|\s+)/g) || [];
+  const tokens    = (sql || "").match(/('.*?'|".*?"|\b\d+\.?\d*\b|\b\w+\b|[^'"\w\s]|\s+)/g) || [];
   return (
     <pre className="p-4 text-sm leading-7 font-mono overflow-x-auto m-0">
       {tokens.map((t, i) => {
         if (/^\s+$/.test(t)) return <span key={i}>{t}</span>;
         const up = t.toUpperCase();
-        if (KEYWORDS.includes(up)) return <span key={i} className="text-orange-300 font-semibold">{t}</span>;
+        if (KEYWORDS.includes(up))  return <span key={i} className="text-orange-300 font-semibold">{t}</span>;
         if (FUNCTIONS.includes(up)) return <span key={i} className="text-yellow-300">{t}</span>;
         if (/^'.*'$/.test(t) || /^\d+\.?\d*$/.test(t)) return <span key={i} className="text-emerald-400">{t}</span>;
         return <span key={i} className="text-stone-300">{t}</span>;
@@ -49,7 +52,7 @@ function CardHeader({ icon, label, right }) {
 const DEFAULT_STATE = {
   generated_sql: "SELECT * FROM students ORDER BY cgpa DESC LIMIT 5;",
   explanation: { intent: "TOP_N", table: "students", order_by: "cgpa", limit: 5 },
-  preprocessed: { intent: "TOP_N", keywords: ["top", "students", "cgpa"] },
+  preprocessed: { intent: "TOP_N", intent_conf: 88.2, intent_source: "neural", keywords: ["top", "students", "cgpa"] },
   schema_match: {
     matched_table: "STUDENTS",
     all_table_scores: { students: 32.6, marks: 29.9, courses: 18.4 },
@@ -60,40 +63,42 @@ const DEFAULT_STATE = {
     columns: ["id", "name", "department", "cgpa", "attendance", "semester"],
     rows: [
       [1, "Ashwin S", "CSE", 8.7, 82, 6],
-      [2, "Priya K", "CSE", 9.1, 91, 6],
-      [3, "Rohit M", "ECE", 7.1, 61, 3],
+      [2, "Priya K",  "CSE", 9.1, 91, 6],
+      [3, "Rohit M",  "ECE", 7.1, 61, 3],
     ],
     row_count: 3,
   },
 };
 
 const INTENT_DESC = {
-  TOP_N: "Fetching top N records ordered by a metric.",
-  BOTTOM_N: "Fetching bottom N records ordered ascending.",
-  COUNT: "Counting total records.",
-  AVERAGE: "Computing average of a numeric column.",
-  FILTER_LT: "Filtering records below a threshold.",
-  FILTER_GT: "Filtering records above a threshold.",
-  SELECT: "Fetching filtered records.",
+  TOP_N      : "Fetching top N records ordered by a metric.",
+  BOTTOM_N   : "Fetching bottom N records ordered ascending.",
+  COUNT      : "Counting total records.",
+  AVERAGE    : "Computing average of a numeric column.",
+  FILTER_LT  : "Filtering records below a threshold.",
+  FILTER_GT  : "Filtering records above a threshold.",
+  SELECT     : "Fetching filtered records.",
   SELECT_FILTER: "Filtering by a specific column value.",
-  SELECT_ALL: "Fetching all records from a table.",
+  SELECT_ALL : "Fetching all records from a table.",
 };
 
 export default function App() {
-  const [query, setQuery] = useState("show top 5 students by cgpa in CSE");
-  const [result, setResult] = useState(DEFAULT_STATE);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [copied, setCopied] = useState(false);
+  const [query, setQuery]         = useState("show top 5 students by cgpa");
+  const [result, setResult]       = useState(DEFAULT_STATE);
+  const [loading, setLoading]     = useState(false);
+  const [error, setError]         = useState(null);
+  const [copied, setCopied]       = useState(false);
   const [activeTab, setActiveTab] = useState("Query");
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [schemaInfo, setSchemaInfo] = useState(null);
+  const [schemaInfo, setSchemaInfo]   = useState(null);
+  const [modelInfo, setModelInfo]     = useState(null);
   const [history, setHistory] = useState(() => {
     try { return JSON.parse(localStorage.getItem("nl2sql_history") || "[]"); } catch { return []; }
   });
 
   useEffect(() => {
     fetch("/schema").then(r => r.json()).then(setSchemaInfo).catch(() => {});
+    fetch("/model-info").then(r => r.json()).then(setModelInfo).catch(() => {});
   }, []);
 
   async function handleGenerate(q = query) {
@@ -101,15 +106,28 @@ export default function App() {
     setLoading(true); setError(null);
     try {
       const res = await fetch("/query", {
-        method: "POST",
+        method : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: q }),
+        body   : JSON.stringify({ query: q }),
       });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       const data = await res.json();
       setResult(data);
-      const entry = { query: q, sql: data.generated_sql || "", intent: data.preprocessed?.intent || "—", success: data.execution?.success ?? false, row_count: data.execution?.row_count ?? 0, timestamp: new Date().toLocaleTimeString() };
-      setHistory(prev => { const u = [...prev, entry].slice(-50); localStorage.setItem("nl2sql_history", JSON.stringify(u)); return u; });
+      const entry = {
+        query      : q,
+        sql        : data.generated_sql || "",
+        intent     : data.preprocessed?.intent || "—",
+        intent_conf: data.preprocessed?.intent_conf || 0,
+        intent_src : data.preprocessed?.intent_source || "rules",
+        success    : data.execution?.success ?? false,
+        row_count  : data.execution?.row_count ?? 0,
+        timestamp  : new Date().toLocaleTimeString(),
+      };
+      setHistory(prev => {
+        const u = [...prev, entry].slice(-50);
+        localStorage.setItem("nl2sql_history", JSON.stringify(u));
+        return u;
+      });
     } catch (err) { setError(err.message); }
     finally { setLoading(false); }
   }
@@ -119,18 +137,19 @@ export default function App() {
     setCopied(true); setTimeout(() => setCopied(false), 1500);
   }
 
-  const tableNames = schemaInfo ? Object.keys(schemaInfo) : ["students", "marks", "courses"];
-  const sql = result.generated_sql || "";
-  const intent = result.preprocessed?.intent || result.explanation?.intent || "—";
-  const matchedTable = (result.schema_match?.matched_table || "students").toUpperCase();
-  const tableScores = result.schema_match?.all_table_scores || {};
-  const matchedColumns = result.schema_match?.matched_columns || [];
-  const keywords = result.preprocessed?.keywords || [];
-  const explanation = result.explanation || {};
-  const execution = result.execution || { success: false, rows: [], columns: [], row_count: 0 };
-  const tabs = ["Query", "History", "Schema", "Settings"];
+  const tableNames    = schemaInfo ? Object.keys(schemaInfo) : ["students", "marks", "courses"];
+  const sql           = result.generated_sql || "";
+  const intent        = result.preprocessed?.intent || result.explanation?.intent || "—";
+  const intentConf    = result.preprocessed?.intent_conf || 0;
+  const intentSrc     = result.preprocessed?.intent_source || "rules";
+  const matchedTable  = (result.schema_match?.matched_table || "students").toUpperCase();
+  const tableScores   = result.schema_match?.all_table_scores || {};
+  const matchedColumns= result.schema_match?.matched_columns || [];
+  const keywords      = result.preprocessed?.keywords || [];
+  const explanation   = result.explanation || {};
+  const execution     = result.execution || { success: false, rows: [], columns: [], row_count: 0 };
+  const tabs          = ["Query", "History", "Schema", "Settings"];
 
-  // Sidebar content — shared between desktop sidebar and mobile drawer
   const SidebarContent = () => (
     <>
       <div className="flex items-center gap-2.5 px-4 h-11 border-b border-[#e5ddd0] shrink-0">
@@ -141,7 +160,6 @@ export default function App() {
           </svg>
         </div>
         <span className="font-bold text-sm tracking-tight text-[#1c1410]">NL2SQL</span>
-        {/* Close button — mobile only */}
         <button onClick={() => setSidebarOpen(false)} className="ml-auto md:hidden text-[#8a7a6a] hover:text-[#1c1410]">
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
@@ -164,6 +182,14 @@ export default function App() {
           </div>
         ))}
       </div>
+
+      {/* Neural model badge */}
+      <div className="px-3 py-2 mx-3 mb-2 bg-[#fff8f6] border border-[#f5c4bc] text-[10px] text-[#c92a0e]">
+        <div className="font-semibold mb-0.5">Neural Intent Model</div>
+        <div className="text-[#8a7a6a]">MiniLM + Linear head</div>
+        <div className="text-[#8a7a6a]">90% val accuracy</div>
+      </div>
+
       <div className="px-4 py-3 border-t border-[#e5ddd0] space-y-1.5 shrink-0">
         <div className="flex items-center justify-between text-[10px] text-[#8a7a6a]">
           <span>Backend</span>
@@ -180,7 +206,6 @@ export default function App() {
   return (
     <div className="flex h-screen overflow-hidden text-[#1c1410] text-xs font-mono">
 
-      {/* ── MOBILE SIDEBAR OVERLAY ── */}
       {sidebarOpen && (
         <div className="fixed inset-0 z-40 md:hidden">
           <div className="absolute inset-0 bg-black/30" onClick={() => setSidebarOpen(false)}/>
@@ -190,18 +215,14 @@ export default function App() {
         </div>
       )}
 
-      {/* ── DESKTOP SIDEBAR ── */}
       <aside className="hidden md:flex w-48 shrink-0 flex-col bg-[#fdfcfa] border-r border-[#e5ddd0]">
         <SidebarContent />
       </aside>
 
-      {/* ── MAIN ── */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
 
-        {/* Nav */}
         <nav className="flex items-center justify-between px-3 md:px-5 h-11 bg-[#fdfcfa] border-b border-[#e5ddd0] shrink-0">
           <div className="flex items-center gap-2 h-full">
-            {/* Mobile hamburger */}
             <button onClick={() => setSidebarOpen(true)} className="md:hidden w-8 h-8 flex items-center justify-center text-[#8a7a6a] hover:text-[#1c1410] shrink-0">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16"/></svg>
             </button>
@@ -216,17 +237,15 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <span className="hidden sm:block text-[10px] text-[#8a7a6a]">FastAPI · SQLite</span>
+            <span className="hidden sm:block text-[10px] text-[#8a7a6a]">FastAPI · SQLite · Neural</span>
             <div className="w-7 h-7 bg-[#c92a0e] flex items-center justify-center text-[10px] font-bold text-white shrink-0">AS</div>
           </div>
         </nav>
 
-        {/* Content */}
         <div className="flex-1 overflow-hidden">
-
-          {activeTab === "History" && <div className="h-full overflow-y-auto p-3 md:p-4"><HistoryPage history={history} onRerun={q => { setQuery(q); setActiveTab("Query"); handleGenerate(q); }} onClear={() => { setHistory([]); localStorage.removeItem("nl2sql_history"); }} /></div>}
-          {activeTab === "Schema" && <div className="h-full overflow-y-auto p-3 md:p-4"><SchemaPage schemaInfo={schemaInfo} /></div>}
-          {activeTab === "Settings" && <div className="h-full overflow-y-auto p-3 md:p-4"><SettingsPage /></div>}
+          {activeTab === "History"  && <div className="h-full overflow-y-auto p-3 md:p-4"><HistoryPage history={history} onRerun={q => { setQuery(q); setActiveTab("Query"); handleGenerate(q); }} onClear={() => { setHistory([]); localStorage.removeItem("nl2sql_history"); }} /></div>}
+          {activeTab === "Schema"   && <div className="h-full overflow-y-auto p-3 md:p-4"><SchemaPage schemaInfo={schemaInfo} /></div>}
+          {activeTab === "Settings" && <div className="h-full overflow-y-auto p-3 md:p-4"><SettingsPage modelInfo={modelInfo} /></div>}
 
           {activeTab === "Query" && (
             <div className="flex flex-col md:flex-row gap-3 md:gap-4 p-3 md:p-4 h-full overflow-y-auto md:overflow-hidden">
@@ -338,10 +357,9 @@ export default function App() {
                     )}
                   </div>
                 </Card>
-
               </div>
 
-              {/* Right panel — stacks below on mobile */}
+              {/* Right panel */}
               <div className="w-full md:w-56 md:shrink-0 flex flex-col gap-3 md:gap-4 md:overflow-y-auto">
 
                 {/* Schema match */}
@@ -363,11 +381,22 @@ export default function App() {
                   </div>
                 </Card>
 
-                {/* Intent — overflow fix: wrap text properly */}
+                {/* Intent — now shows neural source + confidence */}
                 <Card>
                   <CardHeader icon={<svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>} label="Intent" />
                   <div className="p-4 space-y-2 overflow-hidden">
-                    <span className="inline-block px-3 py-1 text-xs font-bold bg-[#c92a0e] text-white max-w-full truncate">{intent}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="inline-block px-3 py-1 text-xs font-bold bg-[#c92a0e] text-white">{intent}</span>
+                      <span className="text-[10px] text-[#8a7a6a]">{intentConf}%</span>
+                    </div>
+                    {/* Neural badge */}
+                    <div className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold border ${
+                      intentSrc === "neural"
+                        ? "bg-[#fff0ee] text-[#c92a0e] border-[#f5c4bc]"
+                        : "bg-stone-100 text-stone-500 border-stone-200"
+                    }`}>
+                      {intentSrc === "neural" ? "⚡ neural" : "📋 rules"}
+                    </div>
                     <p className="text-[11px] text-[#8a7a6a] leading-relaxed break-words">{INTENT_DESC[intent] || "Processing query."}</p>
                   </div>
                 </Card>
@@ -377,10 +406,10 @@ export default function App() {
                   <CardHeader icon={<svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>} label="Breakdown" />
                   <div className="p-4 space-y-2 overflow-hidden">
                     {[
-                      ["Intent", explanation.intent || intent],
-                      ["Table", explanation.table || "—"],
-                      ["Order By", explanation.order_by || "—"],
-                      ...(explanation.limit ? [["Limit", explanation.limit]] : []),
+                      ["Intent",    explanation.intent || intent],
+                      ["Table",     explanation.table  || "—"],
+                      ["Order By",  explanation.order_by || "—"],
+                      ...(explanation.limit     ? [["Limit",     explanation.limit]]     : []),
                       ...(explanation.condition ? [["Condition", explanation.condition]] : []),
                     ].map(([k, v]) => (
                       <div key={k} className="flex items-center justify-between gap-2 min-w-0">
@@ -423,8 +452,8 @@ export default function App() {
             <span className={`w-1.5 h-1.5 rounded-full ${loading ? "bg-amber-400 animate-pulse" : error ? "bg-red-500" : "bg-emerald-500"}`}/>
             {loading ? "Generating…" : error ? "Error" : "Ready"}
           </span>
-          <span className="hidden sm:block">all-MiniLM-L6-v2 · SQLite</span>
-          <span>NL2SQL v1.0</span>
+          <span className="hidden sm:block">MiniLM + Neural Classifier · SQLite</span>
+          <span>NL2SQL v2.0</span>
         </div>
 
       </div>
