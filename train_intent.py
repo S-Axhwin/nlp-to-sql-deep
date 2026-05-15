@@ -31,7 +31,7 @@ from backend.nlp.intent_model import IntentClassifier
 
 # ── Config ──────────────────────────────────────────────────
 DATASET_PATH  = "dataset/labeled_dataset.json"
-EPOCHS        = 20
+EPOCHS        = 40
 BATCH_SIZE    = 32
 LEARNING_RATE = 2e-4
 HIDDEN_DIM    = 128

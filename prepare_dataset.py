@@ -1,10 +1,7 @@
 """
 prepare_dataset.py
-Downloads b-mc2/sql-create-context from HuggingFace,
-auto-labels each row by intent (from SQL answer),
+Downloads b-mc2/sql-create-context, labels by HYBRID (SQL + question keywords),
 saves to dataset/labeled_dataset.json
-
-Run: python prepare_dataset.py
 """
 
 import re
@@ -13,31 +10,53 @@ import os
 from collections import Counter
 from datasets import load_dataset
 
-SAVE_PATH = "dataset/labeled_dataset.json"
-MAX_PER_CLASS = 500  # cap per intent class (balanced)
+SAVE_PATH     = "dataset/labeled_dataset.json"
+MAX_PER_CLASS = 600
 
 INTENT_LABELS = ["COUNT", "AVERAGE", "TOP_N", "BOTTOM_N", "FILTER_LT", "FILTER_GT", "SELECT"]
 
 
-def label_from_sql(sql: str) -> str:
-    """Infer intent label by parsing the SQL answer."""
+def label_hybrid(question: str, sql: str) -> str:
+    """Label using BOTH SQL structure AND question keywords (more accurate)."""
     s = sql.upper().strip()
+    q = question.lower().strip()
 
+    # ── COUNT ──
     if re.search(r'\bCOUNT\s*\(', s):
         return "COUNT"
+    if any(w in q for w in ["how many", "count", "total number", "number of"]):
+        return "COUNT"
+
+    # ── AVERAGE ──
     if re.search(r'\b(AVG|AVERAGE)\s*\(', s):
         return "AVERAGE"
-    if re.search(r'ORDER\s+BY\s+\S+\s+DESC\s+LIMIT', s):
+    if any(w in q for w in ["average", "avg", "mean"]):
+        return "AVERAGE"
+
+    # ── TOP_N ──
+    if re.search(r'ORDER\s+BY\s+\S[\s\S]*?\bDESC\b.*?\bLIMIT\b', s):
         return "TOP_N"
-    if re.search(r'ORDER\s+BY\s+\S+\s+ASC\s+LIMIT', s):
+    if any(w in q for w in ["top ", "highest", "best", "most", "maximum", "largest", "greatest"]):
+        return "TOP_N"
+
+    # ── BOTTOM_N ──
+    if re.search(r'ORDER\s+BY\s+\S[\s\S]*?\bASC\b.*?\bLIMIT\b', s):
         return "BOTTOM_N"
-    if re.search(r'ORDER\s+BY\s+.*\bLIMIT\b', s):
-        # no direction specified — default TOP_N
-        return "TOP_N"
-    if re.search(r'WHERE\s+.*\s*<\s*[\d\'"]', s):
+    if any(w in q for w in ["bottom", "lowest", "worst", "least", "minimum", "smallest", "fewest"]):
+        return "BOTTOM_N"
+
+    # ── FILTER_LT ──
+    if re.search(r'WHERE[\s\S]*?\s*<\s*[\d\'"]', s):
         return "FILTER_LT"
-    if re.search(r'WHERE\s+.*\s*>\s*[\d\'"]', s):
+    if any(w in q for w in ["below", "less than", "under", "fewer than", "not more than"]):
+        return "FILTER_LT"
+
+    # ── FILTER_GT ──
+    if re.search(r'WHERE[\s\S]*?\s*>\s*[\d\'"]', s):
         return "FILTER_GT"
+    if any(w in q for w in ["above", "greater than", "more than", "over", "exceeds", "at least"]):
+        return "FILTER_GT"
+
     return "SELECT"
 
 
@@ -46,21 +65,19 @@ def main():
     ds = load_dataset("b-mc2/sql-create-context", split="train")
     print(f"Total rows: {len(ds)}")
 
-    # Label each row
     labeled = []
     for row in ds:
         question = row["question"].strip()
         sql      = row["answer"].strip()
-        intent   = label_from_sql(sql)
+        intent   = label_hybrid(question, sql)
         labeled.append({"text": question, "label": intent, "sql": sql})
 
-    # Count distribution
     dist = Counter(item["label"] for item in labeled)
     print("\nRaw distribution:")
     for k, v in sorted(dist.items()):
-        print(f"  {k:12s}: {v}")
+        print(f"  {k:12s}: {v:>6}")
 
-    # Balance: cap each class at MAX_PER_CLASS
+    # Balance
     balanced = []
     counts   = Counter()
     for item in labeled:
@@ -68,14 +85,13 @@ def main():
             balanced.append(item)
             counts[item["label"]] += 1
 
-    print(f"\nBalanced dataset: {len(balanced)} examples ({MAX_PER_CLASS} per class max)")
+    print(f"\nBalanced: {len(balanced)} examples")
     for k, v in sorted(counts.items()):
         print(f"  {k:12s}: {v}")
 
     os.makedirs("dataset", exist_ok=True)
     with open(SAVE_PATH, "w") as f:
         json.dump(balanced, f, indent=2)
-
     print(f"\nSaved → {SAVE_PATH}")
 
 
