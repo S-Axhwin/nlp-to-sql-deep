@@ -37,7 +37,9 @@ LEARNING_RATE = 2e-4
 HIDDEN_DIM    = 128
 DROPOUT       = 0.1
 SAVE_PATH     = "models/intent_classifier.pt"
-DEVICE        = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+if not torch.cuda.is_available():
+    raise RuntimeError("GPU not found! In Colab: Runtime → Change runtime type → T4 GPU → Save")
+DEVICE        = torch.device("cuda")
 # ─────────────────────────────────────────────────────────────
 
 INTENT_LABELS = ["COUNT", "AVERAGE", "TOP_N", "BOTTOM_N", "FILTER_LT", "FILTER_GT", "SELECT"]
